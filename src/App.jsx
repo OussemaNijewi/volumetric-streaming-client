@@ -1,7 +1,17 @@
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import Gallery from './pages/Gallery';
+import Viewer from './pages/Viewer';
+
 export default function App() {
   return (
-    <div>
-      <h1>My take on a Static Volumetric Viewer</h1>
-    </div>
+    <BrowserRouter>
+      <Routes>
+        {/* Default landing page */}
+        <Route path="/" element={<Gallery />} />
+        
+        {/* Dynamic route for the 3D viewer (e.g., /viewer/spaceRover) */}
+        <Route path="/viewer/:sceneId" element={<Viewer />} />
+      </Routes>
+    </BrowserRouter>
   );
 }
