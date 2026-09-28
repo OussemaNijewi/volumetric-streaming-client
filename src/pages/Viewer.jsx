@@ -24,18 +24,7 @@ export default function Viewer() {
     });
 
     const [metadata, setMetadata] = useState(null);
-    const [statusMessage, setStatusMessage] = useState('Initializing...');
-    const [errorMessage, setErrorMessage] = useState(null);
-
     const [activeHotspotId, setActiveHotspotId] = useState(null);
-
-    const [camDebug, setCamDebug] = useState({
-        position: { x: 0, y: 0, z: 0 },
-        target: { x: 0, y: 0, z: 0 }
-    });
-
-    const [assetRotation, setAssetRotation] = useState({ x: 0, y: 0, z: 0 });
-    const splatsRef = useRef(null);
 
     const handleHotspotClick = (hotspot) => {
         if (activeHotspotId === hotspot.id) {
@@ -51,35 +40,19 @@ export default function Viewer() {
         }
     };
 
-    useEffect(() => {
-        if (splatsRef.current) {
-            splatsRef.current.rotation.set(
-                THREE.MathUtils.degToRad(assetRotation.x),
-                THREE.MathUtils.degToRad(assetRotation.y),
-                THREE.MathUtils.degToRad(assetRotation.z)
-            );
-        }
-    }, [assetRotation]);
-
     useEffect(() => { 
         if (!sceneID) return;
 
         async function fetchMetadata() {
             try {
-                setStatusMessage(`Fetching metadata for: ${sceneID}...`);
                 const response = await fetch(`${API_BASE_URL}/assets/${sceneID}/metadata.json`);
-
                 if (!response.ok) { 
                     throw new Error(`HTTP Error ${response.status}: Could not load metadata.json`);
                 }
-
                 const data = await response.json();
                 setMetadata(data);
-                setStatusMessage('Metadata loaded successfully');
             } catch (err) { 
                 console.error('Error fetching metadata:', err);
-                setErrorMessage(err.message);
-                setStatusMessage(null);    
             }
         }
 
@@ -105,8 +78,12 @@ export default function Viewer() {
 
             const scene = new THREE.Scene();
             
-            const fov = metadata.initial_camera?.fov || 50;
-            const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.01, 100);
+            const camera = new THREE.PerspectiveCamera(
+                metadata.initial_camera?.fov || 50, 
+                window.innerWidth / window.innerHeight, 
+                0.01, 
+                100
+            );
             cameraRef.current = camera;
 
             const camStartPos = metadata.initial_camera.position;
@@ -114,13 +91,6 @@ export default function Viewer() {
 
             const camTargetPos = metadata.initial_camera.target;
             camera.lookAt(camTargetPos.x, camTargetPos.y, camTargetPos.z);
-
-            if (isMounted) {
-                setCamDebug({
-                    position: { x: camStartPos.x, y: camStartPos.y, z: camStartPos.z },
-                    target: { x: camTargetPos.x, y: camTargetPos.y, z: camTargetPos.z }
-                });
-            }
 
             controls = new OrbitControls(camera, renderer.domElement);
             controlsRef.current = controls;
@@ -130,38 +100,21 @@ export default function Viewer() {
             controls.dampingFactor = 0.05;
             controls.update();
 
-            controls.addEventListener('change', () => {
-                if (isMounted) {
-                    setCamDebug({
-                        position: { x: camera.position.x, y: camera.position.y, z: camera.position.z },
-                        target: { x: controls.target.x, y: controls.target.y, z: controls.target.z }
-                    });
-                }
-            });
-
             const spzUrl = `${API_BASE_URL}/assets/${sceneID}/scene.spz`;
             const splatGeometry = await new SPZLoader().loadAsync(spzUrl);
 
             if (!isMounted) return;
 
             const splats = new GaussianSplat(splatGeometry);
-            splatsRef.current = splats;
-
-            let initialRot = { x: 0, y: 0, z: 0 };
+            
             if (metadata.model_transform?.rotation) {
                 const rot = metadata.model_transform.rotation;
-                initialRot = { x: rot.x || 0, y: rot.y || 0, z: rot.z || 0 };
+                splats.rotation.set(
+                    THREE.MathUtils.degToRad(rot.x || 0),
+                    THREE.MathUtils.degToRad(rot.y || 0),
+                    THREE.MathUtils.degToRad(rot.z || 0)
+                );
             }
-
-            if (isMounted) {
-                setAssetRotation(initialRot);
-            }
-
-            splats.rotation.set(
-                THREE.MathUtils.degToRad(initialRot.x),
-                THREE.MathUtils.degToRad(initialRot.y),
-                THREE.MathUtils.degToRad(initialRot.z)
-            );
             scene.add(splats);
 
             const tempV = new THREE.Vector3();
@@ -253,7 +206,6 @@ export default function Viewer() {
                         pointerEvents: 'none'
                     }}
                 >
-                    {/* Hotspot Circular Badge - Black background with white border */}
                     <div
                         className="hotspot-marker"
                         onClick={() => handleHotspotClick(hotspot)}
@@ -283,7 +235,6 @@ export default function Viewer() {
                         {hotspot.id}
                     </div>
 
-                    {/* Popup Card */}
                     {activeHotspotId === hotspot.id && (
                         <div style={{
                             position: 'absolute',
@@ -321,44 +272,21 @@ export default function Viewer() {
             ))}
 
             <div style={{ position: 'absolute', top: '20px', left: '20px', zIndex: 10 }}>
-                <button onClick={() => navigate('/')} style={{ padding: '8px 16px', cursor: 'pointer' }}>
+                <button 
+                    onClick={() => navigate('/')} 
+                    style={{ 
+                        padding: '8px 16px', 
+                        cursor: 'pointer', 
+                        backgroundColor: 'rgba(20, 20, 20, 0.8)', 
+                        color: '#ffffff', 
+                        border: '1px solid rgba(255,255,255,0.2)', 
+                        borderRadius: '6px', 
+                        fontFamily: 'sans-serif', 
+                        fontWeight: '500' 
+                    }}
+                >
                     ← Back to Gallery
                 </button>
-            </div>
-
-            <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', zIndex: 5, pointerEvents: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <div style={{ position: 'absolute', width: '20px', height: '20px', border: '2px solid #00bfff', borderRadius: '50%', boxShadow: '0 0 8px rgba(0, 191, 255, 0.7)' }} />
-                <div style={{ width: '5px', height: '5px', backgroundColor: '#00bfff', borderRadius: '50%', boxShadow: '0 0 6px #00bfff' }} />
-            </div>
-
-            <div style={{ position: 'absolute', bottom: '20px', left: '20px', zIndex: 10, backgroundColor: 'rgba(0, 0, 0, 0.75)', color: '#00ff00', fontFamily: 'monospace', padding: '12px', borderRadius: '5px', fontSize: '12px', pointerEvents: 'none', lineHeight: '1.5' }}>
-                <div style={{ fontWeight: 'bold', borderBottom: '1px solid #00ff00', marginBottom: '4px', paddingBottom: '2px' }}>CAMERA DEBUG HUD</div>
-                <div>POS X: {camDebug.position.x.toFixed(3)}</div>
-                <div>POS Y: {camDebug.position.y.toFixed(3)}</div>
-                <div>POS Z: {camDebug.position.z.toFixed(3)}</div>
-                <div style={{ marginTop: '6px', borderBottom: '1px solid #00ff00', paddingBottom: '2px' }}>TARGET (LOOK AT)</div>
-                <div>TAR X: {camDebug.target.x.toFixed(3)}</div>
-                <div>TAR Y: {camDebug.target.y.toFixed(3)}</div>
-                <div>TAR Z: {camDebug.target.z.toFixed(3)}</div>
-            </div>
-
-            <div style={{ position: 'absolute', bottom: '20px', right: '20px', zIndex: 10, backgroundColor: 'rgba(0, 0, 0, 0.85)', color: '#00ffff', fontFamily: 'monospace', padding: '14px', borderRadius: '6px', fontSize: '12px', lineHeight: '1.5', width: '270px', boxShadow: '0 4px 12px rgba(0,0,0,0.5)' }}>
-                <div style={{ fontWeight: 'bold', borderBottom: '1px solid #00ffff', marginBottom: '8px', paddingBottom: '4px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span>ASSET ROTATION DEBUG</span>
-                    <button onClick={() => setAssetRotation({ x: 0, y: 0, z: 0 })} style={{ background: 'transparent', border: '1px solid #00ffff', color: '#00ffff', cursor: 'pointer', fontSize: '10px', padding: '1px 6px', borderRadius: '3px' }}>RESET</button>
-                </div>
-                <div style={{ marginBottom: '8px', display: 'flex', gap: '6px' }}>
-                    <button onClick={() => setAssetRotation(r => ({ ...r, x: r.x + 180 }))} style={{ flex: 1, background: '#003333', border: '1px solid #00ffff', color: '#00ffff', cursor: 'pointer', padding: '4px', fontSize: '10px', borderRadius: '3px', fontWeight: 'bold' }} title="Quick fix for upside-down assets">+180° X (Flip Upside-Down)</button>
-                </div>
-                {['x', 'y', 'z'].map((axis) => (
-                    <div key={axis} style={{ marginBottom: '6px' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '2px' }}>
-                            <span style={{ textTransform: 'uppercase' }}>ROT {axis}: {assetRotation[axis].toFixed(1)}°</span>
-                            <span style={{ color: '#888888' }}>({THREE.MathUtils.degToRad(assetRotation[axis]).toFixed(3)} rad)</span>
-                        </div>
-                        <input type="range" min="-180" max="180" step="1" value={assetRotation[axis]} onChange={(e) => setAssetRotation({ ...assetRotation, [axis]: parseFloat(e.target.value) })} style={{ width: '100%', cursor: 'pointer' }} />
-                    </div>
-                ))}
             </div>
 
             <div ref={canvasContainerRef} style={{ width: '100%', height: '100%', position: 'absolute', top: 0, left: 0 }} />
