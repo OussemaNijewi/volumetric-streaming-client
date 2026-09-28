@@ -18,7 +18,7 @@ export default function Viewer() {
 
             {/* The Three.js canvas will mount here later */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
-                <h2>Initializing 3D Viewer for: {sceneId}</h2>
+                <h2>Initializing 3D Viewer for: {sceneID}</h2>
             </div>
         </div>
     );
