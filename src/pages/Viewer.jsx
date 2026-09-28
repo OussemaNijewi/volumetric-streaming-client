@@ -90,7 +90,7 @@ export default function Viewer() {
             
             // Read dynamic FOV from metadata (fallback to 50 if missing)
             const fov = metadata.initial_camera?.fov || 50;
-            const camera = new THREE.PerspectiveCamera(fov, window.innerWidth / window.innerHeight, 0.01, 100);
+            const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.01, 100);
 
             //getting initial camera position from metadata.json
             const camStartPos = metadata.initial_camera.position;
@@ -201,6 +201,37 @@ export default function Viewer() {
                 >
                     ← Back to Gallery
                 </button>
+            </div>
+
+            {/* --- ADDED: Center Bright Blue Alignment Crosshair / Reticle Overlay --- */}
+            <div style={{
+                position: 'absolute',
+                top: '50%',
+                left: '50%',
+                transform: 'translate(-50%, -50%)',
+                zIndex: 5,
+                pointerEvents: 'none',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center'
+            }}>
+                {/* Outer targeting reticle ring */}
+                <div style={{
+                    position: 'absolute',
+                    width: '20px',
+                    height: '20px',
+                    border: '2px solid #00bfff',
+                    borderRadius: '50%',
+                    boxShadow: '0 0 8px rgba(0, 191, 255, 0.7)'
+                }} />
+                {/* Center dot */}
+                <div style={{
+                    width: '5px',
+                    height: '5px',
+                    backgroundColor: '#00bfff',
+                    borderRadius: '50%',
+                    boxShadow: '0 0 6px #00bfff'
+                }} />
             </div>
 
             {/* Live Camera Debugging HUD Overlay on Bottom Left */}
