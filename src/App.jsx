@@ -10,7 +10,7 @@ export default function App() {
         <Route path="/" element={<Gallery />} />
         
         {/* Dynamic route for the 3D viewer (e.g., /viewer/spaceRover) */}
-        <Route path="/viewer/:sceneId" element={<Viewer />} />
+        <Route path="/viewer/:sceneID" element={<Viewer />} />
       </Routes>
     </BrowserRouter>
   );
