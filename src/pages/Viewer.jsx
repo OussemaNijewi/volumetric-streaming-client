@@ -6,34 +6,52 @@ import { SPZLoader } from 'three/addons/loaders/SPZLoader.js';
 import { GaussianSplat } from 'three/addons/objects/GaussianSplat.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
-
 const API_BASE_URL = 'http://127.0.0.1:8000';
 
 export default function Viewer() { 
     const { sceneID } = useParams();
     const navigate = useNavigate();
 
-    // create a persistent reference to a DOM element to interact with it
     const canvasContainerRef = useRef(null);
-    
-    // --- ADDED: Ref to store DOM elements of the hotspots for 60fps positioning ---
     const hotspotRefs = useRef([]);
+    const cameraRef = useRef(null);
+    const controlsRef = useRef(null);
+
+    // --- ADDED: State ref to manage the smooth camera flight sequence ---
+    const flightState = useRef({
+        isFlying: false,
+        targetPosition: new THREE.Vector3(),
+        targetLookAt: new THREE.Vector3()
+    });
 
     const [metadata, setMetadata] = useState(null);
     const [statusMessage, setStatusMessage] = useState('Initializing...');
     const [errorMessage, setErrorMessage] = useState(null);
 
-    // Debugging state for live camera positions
     const [camDebug, setCamDebug] = useState({
         position: { x: 0, y: 0, z: 0 },
         target: { x: 0, y: 0, z: 0 }
     });
 
-    // State & Ref for Asset Rotation Debugging & Correction
     const [assetRotation, setAssetRotation] = useState({ x: 0, y: 0, z: 0 });
     const splatsRef = useRef(null);
 
-    // Live updater for asset rotation when adjusted via UI controls
+    // --- MODIFIED: Instead of teleporting, trigger the flight state ---
+    const handleHotspotClick = (hotspot) => {
+        console.log(`Hotspot ${hotspot.id} clicked: ${hotspot.label}`);
+        
+        if (hotspot.camera_flight) {
+            const { position, target } = hotspot.camera_flight;
+            
+            // Set the final destination vectors
+            flightState.current.targetPosition.set(position.x, position.y, position.z);
+            flightState.current.targetLookAt.set(target.x, target.y, target.z);
+            
+            // Enable the flight loop
+            flightState.current.isFlying = true;
+        }
+    };
+
     useEffect(() => {
         if (splatsRef.current) {
             splatsRef.current.rotation.set(
@@ -57,10 +75,8 @@ export default function Viewer() {
                 }
 
                 const data = await response.json();
-
                 setMetadata(data);
                 setStatusMessage('Metadata loaded successfully');
-                console.log('Metadata fetched successfully: ', data);
             } catch (err) { 
                 console.error('Error fetching metadata:', err);
                 setErrorMessage(err.message);
@@ -79,7 +95,6 @@ export default function Viewer() {
         let isMounted = true;
 
         async function initThree() { 
-
             renderer = new THREE.WebGPURenderer();
             await renderer.init();
             renderer.setSize(window.innerWidth, window.innerHeight);
@@ -91,21 +106,16 @@ export default function Viewer() {
 
             const scene = new THREE.Scene();
             
-            // Read dynamic FOV from metadata (fallback to 50 if missing)
             const fov = metadata.initial_camera?.fov || 50;
             const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.01, 100);
+            cameraRef.current = camera;
 
-            //getting initial camera position from metadata.json
             const camStartPos = metadata.initial_camera.position;
-            console.log('cam position:', camStartPos);
             camera.position.set(camStartPos.x, camStartPos.y, camStartPos.z);
 
-            //rotate camera to look at target point
             const camTargetPos = metadata.initial_camera.target;
-            console.log('cam target position:', camTargetPos);
             camera.lookAt(camTargetPos.x, camTargetPos.y, camTargetPos.z);
 
-            // Set initial state matching starting coordinates
             if (isMounted) {
                 setCamDebug({
                     position: { x: camStartPos.x, y: camStartPos.y, z: camStartPos.z },
@@ -113,51 +123,37 @@ export default function Viewer() {
                 });
             }
 
-            // Add OrbitControls for mouse interaction (rotation, pan, zoom)
             controls = new OrbitControls(camera, renderer.domElement);
+            controlsRef.current = controls;
+            
             controls.target.set(camTargetPos.x, camTargetPos.y, camTargetPos.z);
             controls.enableDamping = true;
             controls.dampingFactor = 0.05;
             controls.update();
 
-            // Listen to any changes in camera view or perspective transformations
             controls.addEventListener('change', () => {
                 if (isMounted) {
                     setCamDebug({
-                        position: {
-                            x: camera.position.x,
-                            y: camera.position.y,
-                            z: camera.position.z
-                        },
-                        target: {
-                            x: controls.target.x,
-                            y: controls.target.y,
-                            z: controls.target.z
-                        }
+                        position: { x: camera.position.x, y: camera.position.y, z: camera.position.z },
+                        target: { x: controls.target.x, y: controls.target.y, z: controls.target.z }
                     });
                 }
             });
 
-            //get the spz file from server
             const spzUrl = `${API_BASE_URL}/assets/${sceneID}/scene.spz`;
             const splatGeometry = await new SPZLoader().loadAsync(spzUrl);
 
             if (!isMounted) return;
 
-            //wrap the splatgeometry in a special splat mesh
             const splats = new GaussianSplat(splatGeometry);
-            
-            // Store splats mesh in ref for live interactive rotation
             splatsRef.current = splats;
 
-            //in supersplat rotation is degrees but three js uses radian
             let initialRot = { x: 0, y: 0, z: 0 };
             if (metadata.model_transform?.rotation) {
                 const rot = metadata.model_transform.rotation;
                 initialRot = { x: rot.x || 0, y: rot.y || 0, z: rot.z || 0 };
             }
 
-            // Sync state with initial metadata rotation
             if (isMounted) {
                 setAssetRotation(initialRot);
             }
@@ -169,32 +165,45 @@ export default function Viewer() {
             );
             scene.add(splats);
 
-            // --- ADDED: Vector for calculating hotspot positions without garbage collection buildup ---
             const tempV = new THREE.Vector3();
 
-            //render it - the mesh sorts itself every frame by default
             renderer.setAnimationLoop(() => {
-                controls.update(); // Update orbit controls damping every frame
+                // --- ADDED: Smooth Camera Interpolation Math ---
+                if (flightState.current.isFlying) {
+                    // Disable manual orbit controls so user input doesn't fight the animation
+                    controls.enabled = false;
+
+                    // Lerp camera position and look target by 5% every frame
+                    camera.position.lerp(flightState.current.targetPosition, 0.05);
+                    controls.target.lerp(flightState.current.targetLookAt, 0.05);
+
+                    // Stop flying when we get close enough to the destination
+                    if (
+                        camera.position.distanceTo(flightState.current.targetPosition) < 0.01 &&
+                        controls.target.distanceTo(flightState.current.targetLookAt) < 0.01
+                    ) {
+                        // Snap to exact coordinates to finish
+                        camera.position.copy(flightState.current.targetPosition);
+                        controls.target.copy(flightState.current.targetLookAt);
+                        
+                        flightState.current.isFlying = false;
+                        controls.enabled = true; // Give control back to the user
+                    }
+                }
+
+                controls.update(); 
                 renderer.render(scene, camera);
 
-                // Live projection of 3D hotspots to 2D Screen Space
                 if (metadata && metadata.hotspots && hotspotRefs.current) {
                     metadata.hotspots.forEach((hs, index) => {
                         const el = hotspotRefs.current[index];
                         if (el) {
-                            // 1. Set vector to the world-space coordinates from metadata
                             tempV.set(hs.hotspot_position.x, hs.hotspot_position.y, hs.hotspot_position.z);
-                            
-                            // (REMOVED splatsRef.current.localToWorld(tempV) to prevent double-rotation)
-
-                            // 2. Project the 3D vector onto the 2D camera plane
                             tempV.project(camera);
 
-                            // 3. Hide if the point is behind the camera (z > 1.0 after projection)
                             if (tempV.z > 1.0) {
                                 el.style.display = 'none';
                             } else {
-                                // 4. Map WebGL coordinates (-1 to 1) to Screen CSS coordinates
                                 const x = (tempV.x * 0.5 + 0.5) * window.innerWidth;
                                 const y = (-(tempV.y * 0.5) + 0.5) * window.innerHeight;
                                 
@@ -209,12 +218,9 @@ export default function Viewer() {
 
         initThree();
 
-        //clean up
         return () => {
             isMounted = false;
-            if (controls) {
-                controls.dispose();
-            }
+            if (controls) controls.dispose();
             if (renderer) {
                 renderer.setAnimationLoop(null);
                 renderer.dispose();
@@ -227,27 +233,24 @@ export default function Viewer() {
 
     return (
         <div style={{ width: '100vw', height: '100vh', overflow: 'hidden', position: 'relative' }}>
-            
-            {/* --- ADDED: Styles for hotspot hover effects --- */}
             <style>
                 {`
                     .hotspot-marker {
                         transition: border-color 0.2s ease-in-out;
                     }
                     .hotspot-marker:hover {
-                        border-color: #ffa500 !important; /* Orange */
+                        border-color: #ffa500 !important;
                         z-index: 20 !important;
                     }
                 `}
             </style>
 
-            {/* --- ADDED: Hotspot Overlay Loop --- */}
             {metadata?.hotspots?.map((hotspot, index) => (
                 <div
                     key={hotspot.id}
                     ref={(el) => (hotspotRefs.current[index] = el)}
                     className="hotspot-marker"
-                    onClick={() => console.log(`component with id ${hotspot.id} has been clicked`)}
+                    onClick={() => handleHotspotClick(hotspot)}
                     style={{
                         position: 'absolute',
                         top: 0,
@@ -258,7 +261,7 @@ export default function Viewer() {
                         color: '#ffffff',
                         border: '2px solid #ffffff',
                         borderRadius: '50%',
-                        display: 'none', // initially hidden until coordinates are calculated
+                        display: 'none',
                         alignItems: 'center',
                         justifyContent: 'center',
                         cursor: 'pointer',
@@ -267,7 +270,6 @@ export default function Viewer() {
                         fontFamily: 'sans-serif',
                         fontSize: '14px',
                         userSelect: 'none'
-                        // transform is set dynamically in the animation loop
                     }}
                     title={hotspot.label}
                 >
@@ -275,60 +277,18 @@ export default function Viewer() {
                 </div>
             ))}
 
-            {/* UI overlay on top of the future 3D canvas */}
             <div style={{ position: 'absolute', top: '20px', left: '20px', zIndex: 10 }}>
-                <button
-                    onClick={() => navigate('/')}
-                    style={{ padding: '8px 16px', cursor: 'pointer' }}
-                >
+                <button onClick={() => navigate('/')} style={{ padding: '8px 16px', cursor: 'pointer' }}>
                     ← Back to Gallery
                 </button>
             </div>
 
-            {/* Center Bright Blue Alignment Crosshair / Reticle Overlay */}
-            <div style={{
-                position: 'absolute',
-                top: '50%',
-                left: '50%',
-                transform: 'translate(-50%, -50%)',
-                zIndex: 5,
-                pointerEvents: 'none',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center'
-            }}>
-                <div style={{
-                    position: 'absolute',
-                    width: '20px',
-                    height: '20px',
-                    border: '2px solid #00bfff',
-                    borderRadius: '50%',
-                    boxShadow: '0 0 8px rgba(0, 191, 255, 0.7)'
-                }} />
-                <div style={{
-                    width: '5px',
-                    height: '5px',
-                    backgroundColor: '#00bfff',
-                    borderRadius: '50%',
-                    boxShadow: '0 0 6px #00bfff'
-                }} />
+            <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', zIndex: 5, pointerEvents: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <div style={{ position: 'absolute', width: '20px', height: '20px', border: '2px solid #00bfff', borderRadius: '50%', boxShadow: '0 0 8px rgba(0, 191, 255, 0.7)' }} />
+                <div style={{ width: '5px', height: '5px', backgroundColor: '#00bfff', borderRadius: '50%', boxShadow: '0 0 6px #00bfff' }} />
             </div>
 
-            {/* Live Camera Debugging HUD Overlay on Bottom Left */}
-            <div style={{
-                position: 'absolute',
-                bottom: '20px',
-                left: '20px',
-                zIndex: 10,
-                backgroundColor: 'rgba(0, 0, 0, 0.75)',
-                color: '#00ff00',
-                fontFamily: 'monospace',
-                padding: '12px',
-                borderRadius: '5px',
-                fontSize: '12px',
-                pointerEvents: 'none',
-                lineHeight: '1.5'
-            }}>
+            <div style={{ position: 'absolute', bottom: '20px', left: '20px', zIndex: 10, backgroundColor: 'rgba(0, 0, 0, 0.75)', color: '#00ff00', fontFamily: 'monospace', padding: '12px', borderRadius: '5px', fontSize: '12px', pointerEvents: 'none', lineHeight: '1.5' }}>
                 <div style={{ fontWeight: 'bold', borderBottom: '1px solid #00ff00', marginBottom: '4px', paddingBottom: '2px' }}>CAMERA DEBUG HUD</div>
                 <div>POS X: {camDebug.position.x.toFixed(3)}</div>
                 <div>POS Y: {camDebug.position.y.toFixed(3)}</div>
@@ -339,66 +299,26 @@ export default function Viewer() {
                 <div>TAR Z: {camDebug.target.z.toFixed(3)}</div>
             </div>
 
-            {/* Asset Rotation Control & Debug HUD Overlay on Bottom Right */}
-            <div style={{
-                position: 'absolute',
-                bottom: '20px',
-                right: '20px',
-                zIndex: 10,
-                backgroundColor: 'rgba(0, 0, 0, 0.85)',
-                color: '#00ffff',
-                fontFamily: 'monospace',
-                padding: '14px',
-                borderRadius: '6px',
-                fontSize: '12px',
-                lineHeight: '1.5',
-                width: '270px',
-                boxShadow: '0 4px 12px rgba(0,0,0,0.5)'
-            }}>
+            <div style={{ position: 'absolute', bottom: '20px', right: '20px', zIndex: 10, backgroundColor: 'rgba(0, 0, 0, 0.85)', color: '#00ffff', fontFamily: 'monospace', padding: '14px', borderRadius: '6px', fontSize: '12px', lineHeight: '1.5', width: '270px', boxShadow: '0 4px 12px rgba(0,0,0,0.5)' }}>
                 <div style={{ fontWeight: 'bold', borderBottom: '1px solid #00ffff', marginBottom: '8px', paddingBottom: '4px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <span>ASSET ROTATION DEBUG</span>
-                    <button 
-                        onClick={() => setAssetRotation({ x: 0, y: 0, z: 0 })}
-                        style={{ background: 'transparent', border: '1px solid #00ffff', color: '#00ffff', cursor: 'pointer', fontSize: '10px', padding: '1px 6px', borderRadius: '3px' }}
-                    >
-                        RESET
-                    </button>
+                    <button onClick={() => setAssetRotation({ x: 0, y: 0, z: 0 })} style={{ background: 'transparent', border: '1px solid #00ffff', color: '#00ffff', cursor: 'pointer', fontSize: '10px', padding: '1px 6px', borderRadius: '3px' }}>RESET</button>
                 </div>
-
                 <div style={{ marginBottom: '8px', display: 'flex', gap: '6px' }}>
-                    <button 
-                        onClick={() => setAssetRotation(r => ({ ...r, x: r.x + 180 }))}
-                        style={{ flex: 1, background: '#003333', border: '1px solid #00ffff', color: '#00ffff', cursor: 'pointer', padding: '4px', fontSize: '10px', borderRadius: '3px', fontWeight: 'bold' }}
-                        title="Quick fix for upside-down assets"
-                    >
-                        +180° X (Flip Upside-Down)
-                    </button>
+                    <button onClick={() => setAssetRotation(r => ({ ...r, x: r.x + 180 }))} style={{ flex: 1, background: '#003333', border: '1px solid #00ffff', color: '#00ffff', cursor: 'pointer', padding: '4px', fontSize: '10px', borderRadius: '3px', fontWeight: 'bold' }} title="Quick fix for upside-down assets">+180° X (Flip Upside-Down)</button>
                 </div>
-
                 {['x', 'y', 'z'].map((axis) => (
                     <div key={axis} style={{ marginBottom: '6px' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '2px' }}>
                             <span style={{ textTransform: 'uppercase' }}>ROT {axis}: {assetRotation[axis].toFixed(1)}°</span>
                             <span style={{ color: '#888888' }}>({THREE.MathUtils.degToRad(assetRotation[axis]).toFixed(3)} rad)</span>
                         </div>
-                        <input
-                            type="range"
-                            min="-180"
-                            max="180"
-                            step="1"
-                            value={assetRotation[axis]}
-                            onChange={(e) => setAssetRotation({ ...assetRotation, [axis]: parseFloat(e.target.value) })}
-                            style={{ width: '100%', cursor: 'pointer' }}
-                        />
+                        <input type="range" min="-180" max="180" step="1" value={assetRotation[axis]} onChange={(e) => setAssetRotation({ ...assetRotation, [axis]: parseFloat(e.target.value) })} style={{ width: '100%', cursor: 'pointer' }} />
                     </div>
                 ))}
             </div>
 
-            {/* The Three.js canvas will mount here later */}
-            <div 
-                ref={canvasContainerRef} 
-                style={{ width: '100%', height: '100%', position: 'absolute', top: 0, left: 0 }} 
-            />
+            <div ref={canvasContainerRef} style={{ width: '100%', height: '100%', position: 'absolute', top: 0, left: 0 }} />
         </div>
     );
 }
