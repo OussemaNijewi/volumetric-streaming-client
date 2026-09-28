@@ -26,6 +26,21 @@ export default function Viewer() {
         target: { x: 0, y: 0, z: 0 }
     });
 
+    // --- ADDED: State & Ref for Asset Rotation Debugging & Correction ---
+    const [assetRotation, setAssetRotation] = useState({ x: 0, y: 0, z: 0 });
+    const splatsRef = useRef(null);
+
+    // --- ADDED: Live updater for asset rotation when adjusted via UI controls ---
+    useEffect(() => {
+        if (splatsRef.current) {
+            splatsRef.current.rotation.set(
+                THREE.MathUtils.degToRad(assetRotation.x),
+                THREE.MathUtils.degToRad(assetRotation.y),
+                THREE.MathUtils.degToRad(assetRotation.z)
+            );
+        }
+    }, [assetRotation]);
+
     useEffect(() => { 
         if (!sceneID) return;
 
@@ -128,15 +143,27 @@ export default function Viewer() {
 
             //wrap the splatgeometry in a special splat mesh
             const splats = new GaussianSplat(splatGeometry);
+            
+            // --- ADDED: Store splats mesh in ref for live interactive rotation ---
+            splatsRef.current = splats;
+
             //in supersplat rotation is degrees but three js uses radian
+            let initialRot = { x: 0, y: 0, z: 0 };
             if (metadata.model_transform?.rotation) {
                 const rot = metadata.model_transform.rotation;
-                splats.rotation.set(
-                    THREE.MathUtils.degToRad(rot.x || 0),
-                    THREE.MathUtils.degToRad(rot.y || 0),
-                    THREE.MathUtils.degToRad(rot.z || 0)
-                );
+                initialRot = { x: rot.x || 0, y: rot.y || 0, z: rot.z || 0 };
             }
+
+            // --- ADDED: Sync state with initial metadata rotation ---
+            if (isMounted) {
+                setAssetRotation(initialRot);
+            }
+
+            splats.rotation.set(
+                THREE.MathUtils.degToRad(initialRot.x),
+                THREE.MathUtils.degToRad(initialRot.y),
+                THREE.MathUtils.degToRad(initialRot.z)
+            );
             scene.add(splats);
 
             //render it - the mesh sorts itself every frame by default
@@ -199,6 +226,61 @@ export default function Viewer() {
                 <div>TAR X: {camDebug.target.x.toFixed(3)}</div>
                 <div>TAR Y: {camDebug.target.y.toFixed(3)}</div>
                 <div>TAR Z: {camDebug.target.z.toFixed(3)}</div>
+            </div>
+
+            {/* --- ADDED: Asset Rotation Control & Debug HUD Overlay on Bottom Right --- */}
+            <div style={{
+                position: 'absolute',
+                bottom: '20px',
+                right: '20px',
+                zIndex: 10,
+                backgroundColor: 'rgba(0, 0, 0, 0.85)',
+                color: '#00ffff',
+                fontFamily: 'monospace',
+                padding: '14px',
+                borderRadius: '6px',
+                fontSize: '12px',
+                lineHeight: '1.5',
+                width: '270px',
+                boxShadow: '0 4px 12px rgba(0,0,0,0.5)'
+            }}>
+                <div style={{ fontWeight: 'bold', borderBottom: '1px solid #00ffff', marginBottom: '8px', paddingBottom: '4px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span>ASSET ROTATION DEBUG</span>
+                    <button 
+                        onClick={() => setAssetRotation({ x: 0, y: 0, z: 0 })}
+                        style={{ background: 'transparent', border: '1px solid #00ffff', color: '#00ffff', cursor: 'pointer', fontSize: '10px', padding: '1px 6px', borderRadius: '3px' }}
+                    >
+                        RESET
+                    </button>
+                </div>
+
+                <div style={{ marginBottom: '8px', display: 'flex', gap: '6px' }}>
+                    <button 
+                        onClick={() => setAssetRotation(r => ({ ...r, x: r.x + 180 }))}
+                        style={{ flex: 1, background: '#003333', border: '1px solid #00ffff', color: '#00ffff', cursor: 'pointer', padding: '4px', fontSize: '10px', borderRadius: '3px', fontWeight: 'bold' }}
+                        title="Quick fix for upside-down assets"
+                    >
+                        +180° X (Flip Upside-Down)
+                    </button>
+                </div>
+
+                {['x', 'y', 'z'].map((axis) => (
+                    <div key={axis} style={{ marginBottom: '6px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '2px' }}>
+                            <span style={{ textTransform: 'uppercase' }}>ROT {axis}: {assetRotation[axis].toFixed(1)}°</span>
+                            <span style={{ color: '#888888' }}>({THREE.MathUtils.degToRad(assetRotation[axis]).toFixed(3)} rad)</span>
+                        </div>
+                        <input
+                            type="range"
+                            min="-180"
+                            max="180"
+                            step="1"
+                            value={assetRotation[axis]}
+                            onChange={(e) => setAssetRotation({ ...assetRotation, [axis]: parseFloat(e.target.value) })}
+                            style={{ width: '100%', cursor: 'pointer' }}
+                        />
+                    </div>
+                ))}
             </div>
 
             {/* The Three.js canvas will mount here later */}
