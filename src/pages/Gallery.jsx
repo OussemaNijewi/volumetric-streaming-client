@@ -31,8 +31,8 @@ export default function Gallery() {
   return (
     <div style={{ padding: '2rem', maxWidth: '1200px', margin: '0 auto' }}>
       <header style={{ marginBottom: '3rem', textAlign: 'center' }}>
-        <h1 style={{ fontSize: '2.5rem', marginBottom: '0.5rem' }}>My take on a Static Volumetric Viewer</h1>
-        <p style={{ color: '#aaa' }}>Select a scene to launch the 3D viewer</p>
+        <h1 style={{ fontSize: '2.5rem', marginBottom: '0.5rem' }}>Static 3D Gaussian Splatting Render with Three js</h1>
+        <p style={{ color: '#aaa' }}>Select a scene to launch the 3D asset</p>
       </header>
       
       <main>
