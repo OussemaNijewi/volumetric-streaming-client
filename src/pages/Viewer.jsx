@@ -15,6 +15,9 @@ export default function Viewer() {
 
     // create a persistent reference to a DOM element to interact with it
     const canvasContainerRef = useRef(null);
+    
+    // --- ADDED: Ref to store DOM elements of the hotspots for 60fps positioning ---
+    const hotspotRefs = useRef([]);
 
     const [metadata, setMetadata] = useState(null);
     const [statusMessage, setStatusMessage] = useState('Initializing...');
@@ -26,11 +29,11 @@ export default function Viewer() {
         target: { x: 0, y: 0, z: 0 }
     });
 
-    // --- ADDED: State & Ref for Asset Rotation Debugging & Correction ---
+    // State & Ref for Asset Rotation Debugging & Correction
     const [assetRotation, setAssetRotation] = useState({ x: 0, y: 0, z: 0 });
     const splatsRef = useRef(null);
 
-    // --- ADDED: Live updater for asset rotation when adjusted via UI controls ---
+    // Live updater for asset rotation when adjusted via UI controls
     useEffect(() => {
         if (splatsRef.current) {
             splatsRef.current.rotation.set(
@@ -144,7 +147,7 @@ export default function Viewer() {
             //wrap the splatgeometry in a special splat mesh
             const splats = new GaussianSplat(splatGeometry);
             
-            // --- ADDED: Store splats mesh in ref for live interactive rotation ---
+            // Store splats mesh in ref for live interactive rotation
             splatsRef.current = splats;
 
             //in supersplat rotation is degrees but three js uses radian
@@ -154,7 +157,7 @@ export default function Viewer() {
                 initialRot = { x: rot.x || 0, y: rot.y || 0, z: rot.z || 0 };
             }
 
-            // --- ADDED: Sync state with initial metadata rotation ---
+            // Sync state with initial metadata rotation
             if (isMounted) {
                 setAssetRotation(initialRot);
             }
@@ -166,10 +169,41 @@ export default function Viewer() {
             );
             scene.add(splats);
 
+            // --- ADDED: Vector for calculating hotspot positions without garbage collection buildup ---
+            const tempV = new THREE.Vector3();
+
             //render it - the mesh sorts itself every frame by default
             renderer.setAnimationLoop(() => {
                 controls.update(); // Update orbit controls damping every frame
                 renderer.render(scene, camera);
+
+                // Live projection of 3D hotspots to 2D Screen Space
+                if (metadata && metadata.hotspots && hotspotRefs.current) {
+                    metadata.hotspots.forEach((hs, index) => {
+                        const el = hotspotRefs.current[index];
+                        if (el) {
+                            // 1. Set vector to the world-space coordinates from metadata
+                            tempV.set(hs.hotspot_position.x, hs.hotspot_position.y, hs.hotspot_position.z);
+                            
+                            // (REMOVED splatsRef.current.localToWorld(tempV) to prevent double-rotation)
+
+                            // 2. Project the 3D vector onto the 2D camera plane
+                            tempV.project(camera);
+
+                            // 3. Hide if the point is behind the camera (z > 1.0 after projection)
+                            if (tempV.z > 1.0) {
+                                el.style.display = 'none';
+                            } else {
+                                // 4. Map WebGL coordinates (-1 to 1) to Screen CSS coordinates
+                                const x = (tempV.x * 0.5 + 0.5) * window.innerWidth;
+                                const y = (-(tempV.y * 0.5) + 0.5) * window.innerHeight;
+                                
+                                el.style.display = 'flex';
+                                el.style.transform = `translate(${x}px, ${y}px) translate(-50%, -50%)`;
+                            }
+                        }
+                    });
+                }
             });
         }
 
@@ -193,6 +227,54 @@ export default function Viewer() {
 
     return (
         <div style={{ width: '100vw', height: '100vh', overflow: 'hidden', position: 'relative' }}>
+            
+            {/* --- ADDED: Styles for hotspot hover effects --- */}
+            <style>
+                {`
+                    .hotspot-marker {
+                        transition: border-color 0.2s ease-in-out;
+                    }
+                    .hotspot-marker:hover {
+                        border-color: #ffa500 !important; /* Orange */
+                        z-index: 20 !important;
+                    }
+                `}
+            </style>
+
+            {/* --- ADDED: Hotspot Overlay Loop --- */}
+            {metadata?.hotspots?.map((hotspot, index) => (
+                <div
+                    key={hotspot.id}
+                    ref={(el) => (hotspotRefs.current[index] = el)}
+                    className="hotspot-marker"
+                    onClick={() => console.log(`component with id ${hotspot.id} has been clicked`)}
+                    style={{
+                        position: 'absolute',
+                        top: 0,
+                        left: 0,
+                        width: '32px',
+                        height: '32px',
+                        backgroundColor: '#000000',
+                        color: '#ffffff',
+                        border: '2px solid #ffffff',
+                        borderRadius: '50%',
+                        display: 'none', // initially hidden until coordinates are calculated
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        cursor: 'pointer',
+                        zIndex: 15,
+                        fontWeight: 'bold',
+                        fontFamily: 'sans-serif',
+                        fontSize: '14px',
+                        userSelect: 'none'
+                        // transform is set dynamically in the animation loop
+                    }}
+                    title={hotspot.label}
+                >
+                    {hotspot.id}
+                </div>
+            ))}
+
             {/* UI overlay on top of the future 3D canvas */}
             <div style={{ position: 'absolute', top: '20px', left: '20px', zIndex: 10 }}>
                 <button
@@ -203,7 +285,7 @@ export default function Viewer() {
                 </button>
             </div>
 
-            {/* --- ADDED: Center Bright Blue Alignment Crosshair / Reticle Overlay --- */}
+            {/* Center Bright Blue Alignment Crosshair / Reticle Overlay */}
             <div style={{
                 position: 'absolute',
                 top: '50%',
@@ -215,7 +297,6 @@ export default function Viewer() {
                 alignItems: 'center',
                 justifyContent: 'center'
             }}>
-                {/* Outer targeting reticle ring */}
                 <div style={{
                     position: 'absolute',
                     width: '20px',
@@ -224,7 +305,6 @@ export default function Viewer() {
                     borderRadius: '50%',
                     boxShadow: '0 0 8px rgba(0, 191, 255, 0.7)'
                 }} />
-                {/* Center dot */}
                 <div style={{
                     width: '5px',
                     height: '5px',
@@ -259,7 +339,7 @@ export default function Viewer() {
                 <div>TAR Z: {camDebug.target.z.toFixed(3)}</div>
             </div>
 
-            {/* --- ADDED: Asset Rotation Control & Debug HUD Overlay on Bottom Right --- */}
+            {/* Asset Rotation Control & Debug HUD Overlay on Bottom Right */}
             <div style={{
                 position: 'absolute',
                 bottom: '20px',
