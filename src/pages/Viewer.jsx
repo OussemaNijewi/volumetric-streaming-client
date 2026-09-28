@@ -17,7 +17,6 @@ export default function Viewer() {
     const cameraRef = useRef(null);
     const controlsRef = useRef(null);
 
-    // --- ADDED: State ref to manage the smooth camera flight sequence ---
     const flightState = useRef({
         isFlying: false,
         targetPosition: new THREE.Vector3(),
@@ -28,6 +27,8 @@ export default function Viewer() {
     const [statusMessage, setStatusMessage] = useState('Initializing...');
     const [errorMessage, setErrorMessage] = useState(null);
 
+    const [activeHotspotId, setActiveHotspotId] = useState(null);
+
     const [camDebug, setCamDebug] = useState({
         position: { x: 0, y: 0, z: 0 },
         target: { x: 0, y: 0, z: 0 }
@@ -36,19 +37,17 @@ export default function Viewer() {
     const [assetRotation, setAssetRotation] = useState({ x: 0, y: 0, z: 0 });
     const splatsRef = useRef(null);
 
-    // --- MODIFIED: Instead of teleporting, trigger the flight state ---
     const handleHotspotClick = (hotspot) => {
-        console.log(`Hotspot ${hotspot.id} clicked: ${hotspot.label}`);
-        
-        if (hotspot.camera_flight) {
-            const { position, target } = hotspot.camera_flight;
-            
-            // Set the final destination vectors
-            flightState.current.targetPosition.set(position.x, position.y, position.z);
-            flightState.current.targetLookAt.set(target.x, target.y, target.z);
-            
-            // Enable the flight loop
-            flightState.current.isFlying = true;
+        if (activeHotspotId === hotspot.id) {
+            setActiveHotspotId(null);
+        } else {
+            setActiveHotspotId(hotspot.id);
+            if (hotspot.camera_flight) {
+                const { position, target } = hotspot.camera_flight;
+                flightState.current.targetPosition.set(position.x, position.y, position.z);
+                flightState.current.targetLookAt.set(target.x, target.y, target.z);
+                flightState.current.isFlying = true;
+            }
         }
     };
 
@@ -168,26 +167,21 @@ export default function Viewer() {
             const tempV = new THREE.Vector3();
 
             renderer.setAnimationLoop(() => {
-                // --- ADDED: Smooth Camera Interpolation Math ---
                 if (flightState.current.isFlying) {
-                    // Disable manual orbit controls so user input doesn't fight the animation
                     controls.enabled = false;
 
-                    // Lerp camera position and look target by 5% every frame
                     camera.position.lerp(flightState.current.targetPosition, 0.05);
                     controls.target.lerp(flightState.current.targetLookAt, 0.05);
 
-                    // Stop flying when we get close enough to the destination
                     if (
                         camera.position.distanceTo(flightState.current.targetPosition) < 0.01 &&
                         controls.target.distanceTo(flightState.current.targetLookAt) < 0.01
                     ) {
-                        // Snap to exact coordinates to finish
                         camera.position.copy(flightState.current.targetPosition);
                         controls.target.copy(flightState.current.targetLookAt);
                         
                         flightState.current.isFlying = false;
-                        controls.enabled = true; // Give control back to the user
+                        controls.enabled = true;
                     }
                 }
 
@@ -207,8 +201,8 @@ export default function Viewer() {
                                 const x = (tempV.x * 0.5 + 0.5) * window.innerWidth;
                                 const y = (-(tempV.y * 0.5) + 0.5) * window.innerHeight;
                                 
-                                el.style.display = 'flex';
-                                el.style.transform = `translate(${x}px, ${y}px) translate(-50%, -50%)`;
+                                el.style.display = 'block';
+                                el.style.transform = `translate(${x}px, ${y}px)`;
                             }
                         }
                     });
@@ -236,11 +230,11 @@ export default function Viewer() {
             <style>
                 {`
                     .hotspot-marker {
-                        transition: border-color 0.2s ease-in-out;
+                        transition: border-color 0.2s ease-in-out, transform 0.2s ease-in-out;
                     }
                     .hotspot-marker:hover {
                         border-color: #ffa500 !important;
-                        z-index: 20 !important;
+                        transform: translate(-50%, -50%) scale(1.1) !important;
                     }
                 `}
             </style>
@@ -249,31 +243,80 @@ export default function Viewer() {
                 <div
                     key={hotspot.id}
                     ref={(el) => (hotspotRefs.current[index] = el)}
-                    className="hotspot-marker"
-                    onClick={() => handleHotspotClick(hotspot)}
                     style={{
                         position: 'absolute',
                         top: 0,
                         left: 0,
-                        width: '32px',
-                        height: '32px',
-                        backgroundColor: '#000000',
-                        color: '#ffffff',
-                        border: '2px solid #ffffff',
-                        borderRadius: '50%',
                         display: 'none',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        cursor: 'pointer',
-                        zIndex: 15,
-                        fontWeight: 'bold',
-                        fontFamily: 'sans-serif',
-                        fontSize: '14px',
-                        userSelect: 'none'
+                        zIndex: activeHotspotId === hotspot.id ? 25 : 15,
+                        userSelect: 'none',
+                        pointerEvents: 'none'
                     }}
-                    title={hotspot.label}
                 >
-                    {hotspot.id}
+                    {/* Hotspot Circular Badge - Black background with white border */}
+                    <div
+                        className="hotspot-marker"
+                        onClick={() => handleHotspotClick(hotspot)}
+                        style={{
+                            position: 'absolute',
+                            top: 0,
+                            left: 0,
+                            transform: 'translate(-50%, -50%)',
+                            width: '32px',
+                            height: '32px',
+                            backgroundColor: '#000000',
+                            color: '#ffffff',
+                            border: '2px solid #ffffff',
+                            borderRadius: '50%',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            cursor: 'pointer',
+                            fontWeight: 'bold',
+                            fontFamily: 'sans-serif',
+                            fontSize: '14px',
+                            boxShadow: '0 2px 8px rgba(0,0,0,0.5)',
+                            pointerEvents: 'auto'
+                        }}
+                        title={hotspot.label}
+                    >
+                        {hotspot.id}
+                    </div>
+
+                    {/* Popup Card */}
+                    {activeHotspotId === hotspot.id && (
+                        <div style={{
+                            position: 'absolute',
+                            left: '22px',
+                            top: '50%',
+                            transform: 'translateY(-50%)',
+                            backgroundColor: 'rgba(20, 20, 20, 0.92)',
+                            color: '#ffffff',
+                            padding: '12px 16px',
+                            borderRadius: '8px',
+                            width: '260px',
+                            boxShadow: '0 6px 20px rgba(0,0,0,0.6)',
+                            border: '1px solid rgba(255,255,255,0.15)',
+                            fontFamily: 'sans-serif',
+                            pointerEvents: 'auto'
+                        }}>
+                            <div style={{
+                                fontWeight: 'bold',
+                                fontSize: '14px',
+                                marginBottom: '4px',
+                                color: '#ffffff'
+                            }}>
+                                {hotspot.title}
+                            </div>
+                            <div style={{
+                                fontSize: '12px',
+                                lineHeight: '1.4',
+                                color: '#cccccc'
+                            }}>
+                                {hotspot.description}
+                            </div>
+                        </div>
+                    )}
                 </div>
             ))}
 
